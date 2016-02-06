@@ -45,5 +45,6 @@ chmod -R 744 .
 
 chown -R www-data:www-data .
 
-
 service apache2 restart
+
+apt-get install mysql-client-core-5.6
