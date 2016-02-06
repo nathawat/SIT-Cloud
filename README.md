@@ -16,7 +16,7 @@ php5enmod mcrypt
 
 nano /etc/apache2/sites-enabled/000-default.conf
 
-
+```
 <VirtualHost *:80>
         #ServerName sit-cloud.com
         #ServerAlias www.sit-cloud.com
@@ -29,7 +29,7 @@ nano /etc/apache2/sites-enabled/000-default.conf
                 Allow from all
         </Directory>
 </VirtualHost>
-
+```
 
 cd /var/www/
 
