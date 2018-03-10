@@ -1,0 +1,135 @@
+#!bash
+echo "Stop Selinux"
+setenforce 0
+
+num_cpu=`cat /proc/cpuinfo | grep -c processor`
+availMem=$(free | awk '/Mem:/ { print $4 }')
+sum=$(($num_cpu * 2))
+nofiles=$(($sum * 3 * 1024))
+
+########### SETUP NGINX  ##################
+echo "SETUP NGINX"
+yum -y update
+
+mkdir -p /var/www/sit-workshop #make directories for this webserver
+chmod 755 -R /var/wwww/sit-workshop  #set permissions nginx will need
+chown -R nginx:nginx /var/www/sit-workshop
+
+# install Nginx
+yum -y install nginx
+# start the Nginx service now
+service nginx restart
+
+########### SETUP PHP ##################
+echo "SETUP PHP"
+# Install PHP
+yum -y install php php-fpm php-cli php-mysql php-gd php-ldap php-odbc php-pdo \
+php-pecl-memcache php-pear php-mbstring php-xml php-xmlrpc php-mbstring php-snmp php-soap php-devel
+
+# Configure PHP
+
+sed -i.original "s%;date.timezone =.*%date.timezone = UTC%" /etc/php.ini #backs up the file and changes the timezone parameter
+sed -i "s/error_reporting =.*/error_reporting = E_ALL \& ~E_NOTICE \& ~E_STRICT \& ~E_DEPRECATED/" /etc/php.ini #notifications
+sed -i "s/;cgi.fix_pathinfo=.*/cgi.fix_pathinfo = 0/" /etc/php.ini #for security
+sed -i "s/.*expose_php.=.*/expose_php = Off/" /etc/php.ini #for security
+sed -i '/php.net\/output-buffering/a\output_buffering = On' /etc/php.ini #for usability
+sed -i 's/post_max_size = 8M/post_max_size = 60M/g' /etc/php.ini #for usability
+sed -i 's/upload_max_filesize = 2M/upload_max_filesize = 60M/g' /etc/php.ini #for usability
+sed -i 's/;default_charset = "UTF-8"/default_charset = "UTF-8"/' /etc/php.ini #save lots pf problems
+sed -i 's/;.*session.gc_max.*/session.gc_maxlifetime = 2880/' /etc/php.ini #for usability
+sed -i.original 's/listen =.*/listen = \/var\/run\/php-fpm\/php-fpm.sock/' /etc/php-fpm.d/www.conf #performance
+sed -i 's/user = apache/user = nginx/' /etc/php-fpm.d/www.conf #for permissions
+sed -i 's/group = apache/group = nginx/' /etc/php-fpm.d/www.conf #for permissions
+chmod 770 /var/lib/php/session/
+chown nginx:nginx /var/lib/php/session/
+
+#systemctl enable php-fpm.service
+#systemctl start php-fpm.service
+service php-fpm restart
+
+######## CONFIGURE NGINX #################
+echo "CONFIG NGINX"
+
+sed -i.original "0,/worker_processes.* [0-9];/s//worker_processes $num_cpu;/" /etc/nginx/nginx.conf
+sed -i 's/worker_connections  1024/worker_connections  2048/' /etc/nginx/nginx.conf
+sed -i 's/keepalive_timeout  65/keepalive_timeout  20/' /etc/nginx/nginx.conf
+sed -i 's/#gzip/gzip/' /etc/nginx/nginx.conf
+
+sed -i 's/80 default_server/80/' /etc/nginx/nginx.conf
+
+sed -i '/gzip/a\       include   /etc/nginx/gzip.cfg;' /etc/nginx/nginx.conf
+#sed -i '/*.conf;/a\    include   /etc/nginx/vhosts/*.cfg;' /etc/nginx/nginx.conf
+sed -i '/body_size 20M;/a\     client_body_buffer_size 1M;' /etc/nginx/nginx.conf
+#sed -i '/in.*conf;/d' /etc/nginx/nginx.conf
+
+cat > /etc/nginx/gzip.cfg <<END
+gzip_http_version 1.0;
+gzip_comp_level 5;
+gzip_min_length 512;
+gzip_buffers 4 8k;
+gzip_proxied any;
+gzip_types
+    text/css
+    text/javascript
+    text/xml
+    text/plain
+    text/x-component
+    application/javascript
+    application/x-javascript
+    application/json
+    application/xml
+    application/rssxml
+    application/vnd.ms-fontobject
+    font/truetype
+    font/opentype
+    image/svgxml;
+
+gzip_disable "MSIE [1-6]\.";
+gzip_vary on;
+END
+
+mkdir -p /etc/nginx/vhosts #makes directory and path for virtual hosts config files
+cat > /etc/nginx/conf.d/sit-workshop.conf <<-END
+    server {
+                listen       80 default;
+                server_name network.sit-bootcamp.com;
+                server_tokens   off;
+                root   /var/www/sit-workshop ;
+                error_page  404     /index.html;
+                index  index.php index.html index.htm ;
+                access_log      /var/log/nginx/bootcamp.access_log;
+                error_log       /var/log/nginx/bootcamp.error_log;
+
+    location ~ \.php$ {
+                try_files \$uri =404;
+                fastcgi_split_path_info ^(.+\.php)(/.+)\$;
+                fastcgi_pass unix:/var/run/php-fpm/php-fpm.sock;
+                fastcgi_index  index.php;
+                fastcgi_param  SCRIPT_FILENAME  \$document_root\$fastcgi_script_name;
+                include        fastcgi_params;
+
+    location ~ /\.ht {
+                deny  all;
+                }
+    }
+}
+
+END
+
+#restart nginx
+service nginx restart
+
+yum -y install git
+mkdir -p /var/www/
+cd /var/www/
+git clone https://github.com/WordPress/WordPress.git sit-workshop
+
+chown -R nginx:nginx /var/www/sit-workshop
+chmod -R 755 /var/www/sit-workshop
+chown -R nginx:nginx /var/run/php-fpm/php-fpm.sock
+
+#restart nginx
+service nginx restart
+
+echo "Configuraion complted"
+echo "Done!"
